@@ -33,7 +33,7 @@ async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     origin_username = origin_chat.get("username", "")
 
     log.info(
-        "\n================= 🚨 DETECTED 🚨 =================\n"
+        f"\n================= 🚨 DETECTED 🚨 =================\n"
         f"📌 Чат: {chat.title} (ID: {chat.id})\n"
         f"👤 Пользователь: {user.first_name} @{user.username or '—'} (ID: {user.id})\n"
         f"💬 Сообщение ID: {msg.message_id}\n"
@@ -93,10 +93,10 @@ async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYP
             permissions=full_mute,
             until_date=until
         )
-        log.info(f"🔇 Действие: выдан ПОЛНЫЙ мут на 1 час пользователю {user.id}")
+        log.info(f"🔇 Пользователю {user.id} выдан ПОЛНЫЙ мут на 1 час")
 
         await msg.delete()
-        log.info(f"🗑 Действие: сообщение {msg.message_id} удалено")
+        log.info(f"🗑 Сообщение {msg.message_id} удалено")
         log.info("✅ Обработка завершена\n")
 
     except TelegramError as e:
@@ -104,6 +104,10 @@ async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 def main():
+    if not BOT_TOKEN:
+        log.error("❌ BOT_TOKEN не задан в переменных окружения!")
+        return
+
     # Создаем приложение
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -116,4 +120,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
