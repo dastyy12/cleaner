@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: telegram-bot
+    env: python
+    region: oregon  # можно сменить на нужный регион
+    plan: free      # или другой план
+    pythonVersion: 3.12.17
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: true
