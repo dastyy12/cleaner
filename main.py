@@ -1,5 +1,6 @@
 import logging
 import os
+from telegram.ext import Application, MessageHandler, filters
 from datetime import timedelta
 from telegram import Update, ChatPermissions
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
@@ -102,11 +103,15 @@ async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     except TelegramError as e:
         log.error(f"❌ Ошибка при муте/удалении: {e}")
 
-def main():
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS, guard_external_reply))
-    log.info("✅ Бот запущен и слушает группы")
-    app.run_polling()
+
+    # добавляем твои handlers
+    app.add_handler(MessageHandler(filters.ALL, your_handler_function))
+
+    print("✅ Бот запущен и слушает группы")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
