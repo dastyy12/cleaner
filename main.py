@@ -2,7 +2,12 @@ import logging
 import os
 from datetime import timedelta
 from telegram import Update, ChatPermissions
-from telegram.ext import Application, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 from telegram.error import TelegramError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -104,7 +109,7 @@ async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         log.error(f"❌ Ошибка при муте/удалении: {e}")
 
 
-def main():
+async def main():
     if not BOT_TOKEN:
         log.error("❌ BOT_TOKEN не задан в переменных окружения!")
         return
@@ -118,8 +123,9 @@ def main():
     )
 
     log.info("✅ Бот запущен и слушает группы")
-    app.run_polling()
+    await app.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
