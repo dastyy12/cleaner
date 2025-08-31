@@ -5,38 +5,31 @@ from datetime import timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ChatPermissions, Message
 from aiogram.exceptions import TelegramBadRequest
-
 from dotenv import load_dotenv
 
-# ----- Загружаем .env -----
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ----- Логи -----
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 log = logging.getLogger("moderation")
 
-# ----- Создаём бота и диспетчер -----
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()  # В aiogram 3.x диспетчер теперь без аргументов
-dp.startup.register(lambda _: log.info("✅ Dispatcher готов"))
+dp = Dispatcher()  # В aiogram 3.x диспетчер без аргументов
 
-# ----- Хендлер для сообщений в группах -----
+@dp.startup()
+async def on_startup():
+    log.info("✅ Dispatcher готов")
+
 @dp.message()
 async def guard_external_reply(msg: Message):
-    if not msg:
-        return
-
-    if msg.chat.type not in ["group", "supergroup"]:
+    if not msg or msg.chat.type not in ["group", "supergroup"]:
         return
 
     chat = msg.chat
     user = msg.from_user
-
-    # Преобразуем сообщение в словарь
     d = msg.dict()
     ext = d.get("external_reply")
     if not (ext and ext.get("origin", {}).get("type") == "channel"):
@@ -55,7 +48,6 @@ async def guard_external_reply(msg: Message):
         "================================================="
     )
 
-    # Проверка: админ или нет
     try:
         member = await chat.get_member(user.id)
         if member.is_chat_admin() or member.is_chat_creator():
@@ -65,7 +57,6 @@ async def guard_external_reply(msg: Message):
         log.error(f"❌ Ошибка при проверке статуса пользователя: {e}")
         return
 
-    # Проверка прав бота
     try:
         me = await chat.get_member(bot.id)
         can_delete = getattr(me, "can_delete_messages", False)
@@ -81,7 +72,6 @@ async def guard_external_reply(msg: Message):
         log.error(f"❌ Ошибка при проверке прав бота: {e}")
         return
 
-    # Полный мут
     full_mute = ChatPermissions(
         can_send_messages=False,
         can_send_media_messages=False,
@@ -103,24 +93,18 @@ async def guard_external_reply(msg: Message):
             until_date=until
         )
         log.info(f"🔇 Пользователю {user.id} выдан ПОЛНЫЙ мут на 1 час")
-
         await msg.delete()
         log.info(f"🗑 Сообщение {msg.message_id} удалено")
-        log.info("✅ Обработка завершена\n")
-
     except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при муте/удалении: {e}")
 
-# ----- Главная функция -----
 async def main():
     if not BOT_TOKEN:
         log.error("❌ BOT_TOKEN не задан в переменных окружения!")
         return
-
     log.info("✅ Бот запущен и слушает группы")
     await dp.start_polling(bot)
 
-# ----- Запуск -----
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
