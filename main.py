@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import timedelta
 from telegram import Update, ChatPermissions
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, MessageHandler, ContextTypes, filters
 from telegram.error import TelegramError
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,6 +13,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 log = logging.getLogger("moderation")
+
 
 async def guard_external_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
@@ -108,11 +109,13 @@ def main():
         log.error("❌ BOT_TOKEN не задан в переменных окружения!")
         return
 
-    # Создаем приложение
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Создаем приложение (новый синтаксис)
+    app = Application.builder().token(BOT_TOKEN).build()
 
     # Добавляем хендлер на сообщения в группах
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS, guard_external_reply))
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS & filters.ALL, guard_external_reply)
+    )
 
     log.info("✅ Бот запущен и слушает группы")
     app.run_polling()
