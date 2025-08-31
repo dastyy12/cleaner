@@ -3,7 +3,7 @@ import os
 from datetime import timedelta
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ChatPermissions, Message
+from aiogram.types import ChatPermissions, Message, ChatMemberOwner, ChatMemberAdministrator
 from aiogram.exceptions import TelegramBadRequest
 from dotenv import load_dotenv
 
@@ -30,7 +30,8 @@ async def guard_external_reply(msg: Message):
 
     chat = msg.chat
     user = msg.from_user
-    d = msg.dict()
+    d = msg.model_dump()  # безопасно для Pydantic V2
+
     ext = d.get("external_reply")
     if not (ext and ext.get("origin", {}).get("type") == "channel"):
         return
@@ -50,8 +51,8 @@ async def guard_external_reply(msg: Message):
 
     try:
         member = await chat.get_member(user.id)
-        if member.is_chat_admin() or member.is_chat_creator():
-            log.info("⚠️ Отправитель админ — пропускаем.")
+        if isinstance(member, (ChatMemberAdministrator, ChatMemberOwner)):
+            log.info("⚠️ Отправитель админ/создатель — пропускаем.")
             return
     except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при проверке статуса пользователя: {e}")
@@ -108,3 +109,4 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
