@@ -5,37 +5,39 @@ from datetime import timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ChatPermissions, Message
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.fsm.storage.memory import MemoryStorage
+
 from dotenv import load_dotenv
 
-# Загружаем .env
+# ----- Загружаем .env -----
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ----- ЛОГИ -----
+# ----- Логи -----
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 log = logging.getLogger("moderation")
 
-# --- Создаём бота и диспетчера ---
+# ----- Создаём бота и диспетчер -----
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())  # storage нужен для 3.x
+dp = Dispatcher()  # В aiogram 3.x диспетчер теперь без аргументов
+dp.startup.register(lambda _: log.info("✅ Dispatcher готов"))
 
 # ----- Хендлер для сообщений в группах -----
+@dp.message()
 async def guard_external_reply(msg: Message):
     if not msg:
         return
 
-    # Ограничиваем только группы и супергруппы
     if msg.chat.type not in ["group", "supergroup"]:
         return
 
     chat = msg.chat
     user = msg.from_user
-    d = msg.to_python()  # словарь сообщения
 
+    # Преобразуем сообщение в словарь
+    d = msg.dict()
     ext = d.get("external_reply")
     if not (ext and ext.get("origin", {}).get("type") == "channel"):
         return
@@ -109,19 +111,16 @@ async def guard_external_reply(msg: Message):
     except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при муте/удалении: {e}")
 
-
-# ----- Регистрируем хендлер -----
-dp.message.register(guard_external_reply)  # в aiogram 3.x
-
+# ----- Главная функция -----
 async def main():
     if not BOT_TOKEN:
         log.error("❌ BOT_TOKEN не задан в переменных окружения!")
         return
 
     log.info("✅ Бот запущен и слушает группы")
-    await dp.start_polling(bot)  # bot передаём здесь
+    await dp.start_polling(bot)
 
-
+# ----- Запуск -----
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
