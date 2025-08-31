@@ -5,7 +5,7 @@ from datetime import timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ChatPermissions, Message
 from aiogram.exceptions import TelegramBadRequest
-
+from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
 # Загружаем .env
@@ -21,7 +21,7 @@ log = logging.getLogger("moderation")
 
 # --- Создаём бота и диспетчера ---
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher(storage=MemoryStorage())  # storage нужен для 3.x
 
 # ----- Хендлер для сообщений в группах -----
 async def guard_external_reply(msg: Message):
@@ -111,7 +111,7 @@ async def guard_external_reply(msg: Message):
 
 
 # ----- Регистрируем хендлер -----
-dp.register_message_handler(guard_external_reply)
+dp.message.register(guard_external_reply)  # в aiogram 3.x
 
 async def main():
     if not BOT_TOKEN:
@@ -119,7 +119,7 @@ async def main():
         return
 
     log.info("✅ Бот запущен и слушает группы")
-    await dp.start_polling()
+    await dp.start_polling(bot)  # bot передаём здесь
 
 
 if __name__ == "__main__":
