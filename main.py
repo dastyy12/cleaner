@@ -3,12 +3,8 @@ import os
 from datetime import timedelta
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import ChatTypeFilter
-from aiogram.types import ChatPermissions
+from aiogram.types import ChatPermissions, Message
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.fsm.context import FSMContext
-from aiogram import F
-from aiogram.types import Message
 
 from dotenv import load_dotenv
 
@@ -25,11 +21,15 @@ log = logging.getLogger("moderation")
 
 # --- Создаём бота и диспетчера ---
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
 # ----- Хендлер для сообщений в группах -----
 async def guard_external_reply(msg: Message):
     if not msg:
+        return
+
+    # Ограничиваем только группы и супергруппы
+    if msg.chat.type not in ["group", "supergroup"]:
         return
 
     chat = msg.chat
@@ -111,11 +111,7 @@ async def guard_external_reply(msg: Message):
 
 
 # ----- Регистрируем хендлер -----
-dp.message.register(
-    guard_external_reply,
-    ChatTypeFilter(types.ChatType.GROUP)
-)
-
+dp.register_message_handler(guard_external_reply)
 
 async def main():
     if not BOT_TOKEN:
@@ -123,7 +119,7 @@ async def main():
         return
 
     log.info("✅ Бот запущен и слушает группы")
-    await dp.start_polling(bot)
+    await dp.start_polling()
 
 
 if __name__ == "__main__":
