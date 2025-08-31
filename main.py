@@ -1,20 +1,19 @@
 import logging
 import os
 from datetime import timedelta
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ChatPermissions
-from aiogram.filters import BaseFilter
-from aiogram.types.message import ContentType
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import Message
-from aiogram.types import ChatType
-from aiogram.types import Message as Msg
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import CallbackQuery
-from aiogram import F
-from aiogram.dispatcher.filters import Command
-from aiogram.utils import executor
 
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import ChatTypeFilter
+from aiogram.types import ChatPermissions
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+from aiogram import F
+from aiogram.types import Message
+
+from dotenv import load_dotenv
+
+# Загружаем .env
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ----- ЛОГИ -----
@@ -24,22 +23,19 @@ logging.basicConfig(
 )
 log = logging.getLogger("moderation")
 
-# --- Фильтр на группы для Aiogram 3.x ---
-class IsGroup(BaseFilter):
-    async def __call__(self, message: Message) -> bool:
-        return message.chat.type in [types.ChatType.GROUP, types.ChatType.SUPERGROUP]
+# --- Создаём бота и диспетчера ---
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
-
-async def guard_external_reply(message: Message):
-    msg = message
+# ----- Хендлер для сообщений в группах -----
+async def guard_external_reply(msg: Message):
     if not msg:
         return
 
     chat = msg.chat
     user = msg.from_user
-    d = msg.to_python()  # Для Aiogram 3.x
+    d = msg.to_python()  # словарь сообщения
 
-    # Проверяем external_reply из канала
     ext = d.get("external_reply")
     if not (ext and ext.get("origin", {}).get("type") == "channel"):
         return
@@ -51,44 +47,42 @@ async def guard_external_reply(message: Message):
     log.info(
         f"\n================= 🚨 DETECTED 🚨 =================\n"
         f"📌 Чат: {chat.title} (ID: {chat.id})\n"
-        f"👤 Пользователь: {user.first_name} @{user.username or '—'} (ID: {user.id})\n"
+        f"👤 Пользователь: {user.full_name} @{user.username or '—'} (ID: {user.id})\n"
         f"💬 Сообщение ID: {msg.message_id}\n"
         f"↪️ Репост из канала: {origin_title} @{origin_username or '—'}\n"
         "================================================="
     )
 
-    # Проверка: не админ ли
+    # Проверка: админ или нет
     try:
         member = await chat.get_member(user.id)
         if member.is_chat_admin() or member.is_chat_creator():
             log.info("⚠️ Отправитель админ — пропускаем.")
             return
-    except Exception as e:
+    except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при проверке статуса пользователя: {e}")
         return
 
     # Проверка прав бота
     try:
-        me = await chat.get_member((await bot.get_me()).id)
-        can_delete = getattr(me, "can_delete_messages", None)
-        can_restrict = getattr(me, "can_restrict_members", None)
+        me = await chat.get_member(bot.id)
+        can_delete = getattr(me, "can_delete_messages", False)
+        can_restrict = getattr(me, "can_restrict_members", False)
+        if hasattr(me, "privileges") and me.privileges:
+            can_delete = can_delete or me.privileges.can_delete_messages
+            can_restrict = can_restrict or me.privileges.can_restrict_members
 
         if not can_delete or not can_restrict:
             log.error("❗️У бота нет прав (Delete/Restrict).")
             return
-    except Exception as e:
+    except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при проверке прав бота: {e}")
         return
 
-    # --- Полный мут (запрет вообще на всё)
+    # Полный мут
     full_mute = ChatPermissions(
         can_send_messages=False,
-        can_send_audios=False,
-        can_send_documents=False,
-        can_send_photos=False,
-        can_send_videos=False,
-        can_send_video_notes=False,
-        can_send_voice_notes=False,
+        can_send_media_messages=False,
         can_send_polls=False,
         can_send_other_messages=False,
         can_add_web_page_previews=False,
@@ -100,28 +94,33 @@ async def guard_external_reply(message: Message):
 
     try:
         until = msg.date + timedelta(hours=1)
-        await chat.restrict(user.id, permissions=full_mute, until_date=until)
+        await bot.restrict_chat_member(
+            chat_id=chat.id,
+            user_id=user.id,
+            permissions=full_mute,
+            until_date=until
+        )
         log.info(f"🔇 Пользователю {user.id} выдан ПОЛНЫЙ мут на 1 час")
 
         await msg.delete()
         log.info(f"🗑 Сообщение {msg.message_id} удалено")
         log.info("✅ Обработка завершена\n")
 
-    except Exception as e:
+    except TelegramBadRequest as e:
         log.error(f"❌ Ошибка при муте/удалении: {e}")
+
+
+# ----- Регистрируем хендлер -----
+dp.message.register(
+    guard_external_reply,
+    ChatTypeFilter(types.ChatType.GROUP)
+)
 
 
 async def main():
     if not BOT_TOKEN:
         log.error("❌ BOT_TOKEN не задан в переменных окружения!")
         return
-
-    global bot
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
-
-    # Добавляем хендлер на сообщения в группах
-    dp.message.register(guard_external_reply, IsGroup())
 
     log.info("✅ Бот запущен и слушает группы")
     await dp.start_polling(bot)
