@@ -1,5 +1,5 @@
 aiogram==3.3.0
 aiofiles
-aiohttp==3.9.5
-pydantic==2.5.3
-python-dotenv==1.0.0
+aiohttp
+pydantic
+python-dotenv
