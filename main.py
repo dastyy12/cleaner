@@ -1,111 +1,157 @@
-import logging
-import os
-from datetime import timedelta
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ChatPermissions, Message
-from aiogram.exceptions import TelegramBadRequest
-from dotenv import load_dotenv
+"""
+Main entry point for the crypto signal generation system
+Real-time multi-exchange futures analysis with TradingView integration
+"""
 import asyncio
+import logging
+import sys
+from pathlib import Path
 
-# Загружаем токен из .env
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Add project root to path
+sys.path.append(str(Path(__file__).parent))
 
+from src.core.signal_engine import SignalEngine
+from src.telegram.bot import TelegramBot
+from src.data.data_manager import DataManager
+from src.analysis.analyzer_manager import AnalyzerManager
+from src.tradingview.tv_integration import TradingViewIntegration
+from config import settings
+
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("crypto_signals.log")
+    ]
 )
-log = logging.getLogger("moderation")
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+logger = logging.getLogger(__name__)
 
-# Стартовый хэндлер
-@dp.startup()
-async def on_startup():
-    log.info("✅ Dispatcher готов")
+class CryptoSignalSystem:
+    """Main system orchestrator"""
+    
+    def __init__(self):
+        self.data_manager = None
+        self.analyzer_manager = None
+        self.signal_engine = None
+        self.telegram_bot = None
+        self.tv_integration = None
+        self.running = False
+    
+    async def initialize(self):
+        """Initialize all system components"""
+        logger.info("🚀 Initializing Crypto Signal System...")
+        
+        try:
+            # Initialize data manager
+            self.data_manager = DataManager()
+            await self.data_manager.initialize()
+            logger.info("✅ Data Manager initialized")
+            
+            # Initialize analyzer manager
+            self.analyzer_manager = AnalyzerManager()
+            await self.analyzer_manager.initialize()
+            logger.info("✅ Analyzer Manager initialized")
+            
+            # Initialize TradingView integration
+            self.tv_integration = TradingViewIntegration()
+            await self.tv_integration.initialize()
+            logger.info("✅ TradingView Integration initialized")
+            
+            # Initialize signal engine
+            self.signal_engine = SignalEngine(
+                data_manager=self.data_manager,
+                analyzer_manager=self.analyzer_manager,
+                tv_integration=self.tv_integration
+            )
+            await self.signal_engine.initialize()
+            logger.info("✅ Signal Engine initialized")
+            
+            # Initialize Telegram bot
+            self.telegram_bot = TelegramBot(signal_engine=self.signal_engine)
+            await self.telegram_bot.initialize()
+            logger.info("✅ Telegram Bot initialized")
+            
+            logger.info("🎉 System initialization completed successfully!")
+            
+        except Exception as e:
+            logger.error(f"❌ System initialization failed: {e}")
+            raise
+    
+    async def start(self):
+        """Start the system"""
+        if not self.running:
+            logger.info("🔄 Starting Crypto Signal System...")
+            
+            # Start all components
+            tasks = []
+            
+            # Start data ingestion
+            tasks.append(asyncio.create_task(self.data_manager.start_streaming()))
+            
+            # Start signal generation
+            tasks.append(asyncio.create_task(self.signal_engine.start()))
+            
+            # Start Telegram bot
+            tasks.append(asyncio.create_task(self.telegram_bot.start()))
+            
+            self.running = True
+            logger.info("✅ System started successfully!")
+            
+            # Wait for all tasks
+            try:
+                await asyncio.gather(*tasks)
+            except KeyboardInterrupt:
+                logger.info("🛑 Received shutdown signal")
+                await self.stop()
+            except Exception as e:
+                logger.error(f"❌ System error: {e}")
+                await self.stop()
+                raise
+    
+    async def stop(self):
+        """Stop the system gracefully"""
+        if self.running:
+            logger.info("🛑 Stopping Crypto Signal System...")
+            
+            # Stop all components
+            if self.telegram_bot:
+                await self.telegram_bot.stop()
+            
+            if self.signal_engine:
+                await self.signal_engine.stop()
+            
+            if self.data_manager:
+                await self.data_manager.stop()
+            
+            if self.tv_integration:
+                await self.tv_integration.stop()
+            
+            self.running = False
+            logger.info("✅ System stopped gracefully")
 
-# Основной хэндлер для репостов
-@dp.message()
-async def guard_external_reply(msg: Message):
-    if not msg or msg.chat.type not in ["group", "supergroup"]:
-        return
-
-    # Проверка репоста из канала
-    ext = getattr(msg, "external_reply", None)
-    if not (ext and getattr(ext.origin, "type", None) == "channel"):
-        return
-
-    origin_chat = getattr(ext, "chat", {}) or getattr(ext.origin, "chat", {})
-    origin_title = getattr(origin_chat, "title", "❓")
-    origin_username = getattr(origin_chat, "username", "—")
-
-    user = msg.from_user
-    chat = msg.chat
-
-    log.info(
-        f"\n================= 🚨 DETECTED 🚨 =================\n"
-        f"📌 Чат: {chat.title} (ID: {chat.id})\n"
-        f"👤 Пользователь: {user.full_name} @{user.username or '—'} (ID: {user.id})\n"
-        f"💬 Сообщение ID: {msg.message_id}\n"
-        f"↪️ Репост из канала: {origin_title} @{origin_username}\n"
-        "================================================="
-    )
-
-    # Проверка статуса пользователя
-    try:
-        member = await chat.get_member(user.id)
-        if hasattr(member, "status") and member.status in ["administrator", "creator"]:
-            log.info("⚠️ Отправитель админ — пропускаем.")
-            return
-    except TelegramBadRequest as e:
-        log.error(f"❌ Ошибка при проверке статуса пользователя: {e}")
-        return
-
-    # Проверка прав бота
-    try:
-        me = await chat.get_member(bot.id)
-        can_delete = getattr(me, "can_delete_messages", False)
-        can_restrict = getattr(me, "can_restrict_members", False)
-        if hasattr(me, "privileges") and me.privileges:
-            can_delete = can_delete or me.privileges.can_delete_messages
-            can_restrict = can_restrict or me.privileges.can_restrict_members
-        if not can_delete or not can_restrict:
-            log.error("❗️У бота нет прав (Delete/Restrict).")
-            return
-    except TelegramBadRequest as e:
-        log.error(f"❌ Ошибка при проверке прав бота: {e}")
-        return
-
-    # Полный мут
-    full_mute = ChatPermissions(
-        can_send_messages=False,
-        can_send_media_messages=False,
-        can_send_polls=False,
-        can_send_other_messages=False,
-        can_add_web_page_previews=False,
-        can_change_info=False,
-        can_invite_users=False,
-        can_pin_messages=False,
-        can_manage_topics=False
-    )
-
-    try:
-        until = msg.date + timedelta(hours=1)
-        await bot.restrict_chat_member(chat.id, user.id, permissions=full_mute, until_date=until)
-        log.info(f"🔇 Пользователю {user.id} выдан ПОЛНЫЙ мут на 1 час")
-        await msg.delete()
-        log.info(f"🗑 Сообщение {msg.message_id} удалено")
-    except TelegramBadRequest as e:
-        log.error(f"❌ Ошибка при муте/удалении: {e}")
-
-# Главная функция
 async def main():
-    if not BOT_TOKEN:
-        log.error("❌ BOT_TOKEN не задан в переменных окружения!")
-        return
-    log.info("✅ Бот запущен и слушает группы")
-    await dp.start_polling(bot)
+    """Main entry point"""
+    system = CryptoSignalSystem()
+    
+    try:
+        await system.initialize()
+        await system.start()
+    except KeyboardInterrupt:
+        logger.info("👋 Shutting down...")
+    except Exception as e:
+        logger.error(f"💥 Fatal error: {e}")
+        sys.exit(1)
+    finally:
+        await system.stop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Goodbye!")
+    except Exception as e:
+        logger.error(f"💥 Startup failed: {e}")
+        sys.exit(1)

@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  # Main application
+  crypto-signals:
+    build: .
+    container_name: crypto-signals-app
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+      - redis
+      - postgres
+    environment:
+      # Database connections
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DB=crypto_signals
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=crypto_signals
+      - POSTGRES_USER=crypto_user
+      - POSTGRES_PASSWORD=crypto_password
+      
+      # API Keys (set these in .env file)
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_SECRET=${BINANCE_SECRET:-}
+      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
+      - BYBIT_SECRET=${BYBIT_SECRET:-}
+      - OKX_API_KEY=${OKX_API_KEY:-}
+      - OKX_SECRET=${OKX_SECRET:-}
+      - OKX_PASSPHRASE=${OKX_PASSPHRASE:-}
+      - TV_USERNAME=${TV_USERNAME:-}
+      - TV_PASSWORD=${TV_PASSWORD:-}
+      
+      # Configuration
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-0}
+      - MAX_SIGNALS_PER_HOUR=${MAX_SIGNALS_PER_HOUR:-10}
+    volumes:
+      - ./screenshots:/app/screenshots
+      - ./logs:/app/logs
+    networks:
+      - crypto-signals-network
+
+  # ClickHouse for time-series data
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: crypto-signals-clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      - CLICKHOUSE_DB=crypto_signals
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./docker/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+      - ./docker/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - crypto-signals-network
+
+  # Redis for caching and real-time features
+  redis:
+    image: redis:7.2-alpine
+    container_name: crypto-signals-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - crypto-signals-network
+
+  # PostgreSQL for configuration and user data
+  postgres:
+    image: postgres:15-alpine
+    container_name: crypto-signals-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=crypto_signals
+      - POSTGRES_USER=crypto_user
+      - POSTGRES_PASSWORD=crypto_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - crypto-signals-network
+
+  # Grafana for monitoring (optional)
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: crypto-signals-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - crypto-signals-network
+    profiles:
+      - monitoring
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: crypto-signals-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - prometheus_data:/prometheus
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - crypto-signals-network
+    profiles:
+      - monitoring
+
+volumes:
+  clickhouse_data:
+  redis_data:
+  postgres_data:
+  grafana_data:
+  prometheus_data:
+
+networks:
+  crypto-signals-network:
+    driver: bridge
